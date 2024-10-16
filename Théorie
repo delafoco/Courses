@@ -1,0 +1,9 @@
+Qu'est-ce qu'un modèle de régression linéaire ?
+•	Un modèle de régression linéaire est une méthode utilisée pour prédire une variable à partir d'une ou plusieurs autres variables en traçant une ligne droite.
+À quoi sert la régression linéaire ?
+•	La régression linéaire est utilisée pour comprendre la relation entre les variables et pour faire des prédictions sur la variable dépendante en fonction des valeurs des variables indépendantes.
+Que signifie un coefficient positif dans un modèle de régression linéaire ?
+•	Un coefficient positif signifie que lorsque la variable indépendante augmente, la variable dépendante a également tendance à augmenter.
+
+Qu'est-ce que le MSE (Erreur Quadratique Moyenne) ?
+•	Le MSE est une mesure qui indique à quel point les prédictions d'un modèle sont proches des valeurs réelles. Un MSE plus faible signifie que le modèle est meilleur.
