@@ -5,7 +5,7 @@ Cette application propose deux versions pour le matching de clients :
 ## Version Simple (`app_base.py`)
 
 La version simple utilise un algorithme de matching basique avec les caractéristiques suivantes :
-- Utilisation de l'algorithme Jaro-Winkler pour la comparaison des chaînes
+- Utilisation d'une comparaison simple des chaînes de caractères
 - Score final calculé comme moyenne simple des scores individuels
 - Interface simplifiée avec :
   - Sélection du nombre de clients
@@ -56,8 +56,6 @@ Les deux versions nécessitent les packages Python suivants :
 - streamlit
 - pandas
 - numpy
-- fuzzywuzzy
-- python-Levenshtein
 - unidecode
 - plotly (uniquement pour la version avancée)
 
@@ -123,6 +121,6 @@ matching_customers/
 ## Algorithme de Matching
 
 L'application utilise :
-- L'algorithme Jaro-Winkler via la bibliothèque fuzzywuzzy pour comparer les chaînes de caractères
+- Une comparaison simple des chaînes de caractères pour comparer les chaînes
 - Une approche pondérée pour combiner les scores de similarité des différents attributs
 - Un système de regroupement pour identifier les ensembles de clients similaires 

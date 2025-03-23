@@ -192,8 +192,20 @@ def normalize_string(s):
     return unidecode(str(s).lower())
 
 def calculate_similarity(str1, str2):
-    """Calcule la similarité entre deux chaînes en utilisant Jaro-Winkler"""
-    return fuzz.ratio(normalize_string(str1), normalize_string(str2)) / 100
+    """Calcule la similarité entre deux chaînes en utilisant une comparaison simple"""
+    str1 = normalize_string(str1)
+    str2 = normalize_string(str2)
+    
+    # Si les chaînes sont identiques
+    if str1 == str2:
+        return 1.0
+    
+    # Calculer la longueur de la plus longue sous-chaîne commune
+    max_len = max(len(str1), len(str2))
+    common_chars = sum(1 for c1, c2 in zip(str1, str2) if c1 == c2)
+    
+    # Retourner le ratio de caractères communs
+    return common_chars / max_len
 
 def match_clients(client_a, client_b, weights):
     """Calcule le score de matching entre deux clients en appliquant les poids uniquement au score final"""
@@ -279,15 +291,17 @@ def simulate_matching(clients, weights, threshold):
                 
                 if score >= threshold:
                     matches.append({
-                        'Client A': client_a['Nom'] + ' ' + client_a['Prénom'],
-                        'Client B': client_b['Nom'] + ' ' + client_b['Prénom'],
-                        'Score Global': score,
-                        'Score Nom': detail_scores['Nom'],
-                        'Score Prénom': detail_scores['Prénom'],
-                        'Score Email': detail_scores['Email'],
-                        'Score Téléphone': detail_scores['Téléphone'],
-                        'Score ID Véhicule': detail_scores['ID_Véhicule'],
-                        'Score Immatriculation': detail_scores['Immatriculation']
+                        'Index_A': i,
+                        'Index_B': j,
+                        'Client_A': f"{client_a['Nom']} {client_a['Prénom']}",
+                        'Client_B': f"{client_b['Nom']} {client_b['Prénom']}",
+                        'Score_Global': score,
+                        'Score_Nom': detail_scores['Nom'],
+                        'Score_Prenom': detail_scores['Prénom'],
+                        'Score_Email': detail_scores['Email'],
+                        'Score_Telephone': detail_scores['Téléphone'],
+                        'Score_ID_Vehicule': detail_scores['ID_Véhicule'],
+                        'Score_Immatriculation': detail_scores['Immatriculation']
                     })
                     
                     # Regrouper les clients
@@ -324,50 +338,42 @@ def simulate_matching_advanced(clients, weights, threshold):
     for i, client_a in clients.iterrows():
         for j, client_b in clients.iterrows():
             if i < j:
-                score, detail_scores, decision = match_clients_advanced(client_a, client_b, weights)
+                score, detail_scores = match_clients_advanced(client_a, client_b, weights)
                 
-                if decision != "PAS_FUSION":
-                    matches.append({
-                        'Client A': client_a['Nom'] + ' ' + client_a['Prénom'],
-                        'Client B': client_b['Nom'] + ' ' + client_b['Prénom'],
-                        'Score Global': score,
-                        'Décision': decision,
-                        'Score Nom': detail_scores['Nom'],
-                        'Score Prénom': detail_scores['Prénom'],
-                        'Score Email': detail_scores['Email'],
-                        'Score Téléphone': detail_scores['Téléphone'],
-                        'Score ID Véhicule': detail_scores['ID_Véhicule'],
-                        'Score Immatriculation': detail_scores['Immatriculation']
-                    })
-                    
-                    # Logique de groupement adaptée à la décision
-                    if decision == "FUSION_AUTOMATIQUE":
-                        # Fusion immédiate
-                        if i in client_groups and j in client_groups:
-                            group_a = client_groups[i]
-                            group_b = client_groups[j]
-                            if group_a != group_b:
-                                for idx in client_groups:
-                                    if client_groups[idx] == group_b:
-                                        client_groups[idx] = group_a
-                        elif i in client_groups:
-                            client_groups[j] = client_groups[i]
-                        elif j in client_groups:
-                            client_groups[i] = client_groups[j]
-                        else:
-                            client_groups[i] = next_group_id
-                            client_groups[j] = next_group_id
-                            next_group_id += 1
-                    else:
-                        # Pour les autres décisions, on crée des groupes séparés
-                        if i not in client_groups:
-                            client_groups[i] = next_group_id
-                            next_group_id += 1
-                        if j not in client_groups:
-                            client_groups[j] = next_group_id
-                            next_group_id += 1
+                # Logique de décision basée sur le score
+                if score > 0.9:
+                    decision = "FUSION_AUTOMATIQUE"
+                elif score > 0.85:
+                    decision = "FUSION_VERIFICATION"
+                elif score > 0.75:
+                    decision = "FUSION_VALIDATION"
+                else:
+                    decision = "PAS_FUSION"
+                
+                match_data = {
+                    'Index_A': i,
+                    'Index_B': j,
+                    'Client_A': f"{client_a['Nom']} {client_a['Prénom']}",
+                    'Client_B': f"{client_b['Nom']} {client_b['Prénom']}",
+                    'Score_Global': score,
+                    'Decision': decision,
+                    'Score_Nom': detail_scores['Nom'],
+                    'Score_Prenom': detail_scores['Prénom'],
+                    'Score_Email': detail_scores['Email'],
+                    'Score_Telephone': detail_scores['Téléphone'],
+                    'Score_ID_Vehicule': detail_scores['ID_Véhicule'],
+                    'Score_Immatriculation': detail_scores['Immatriculation']
+                }
+                matches.append(match_data)
     
-    return pd.DataFrame(matches), client_groups
+    # Convertir les groupes en listes d'indices
+    group_indices = {}
+    for idx, group_id in client_groups.items():
+        if group_id not in group_indices:
+            group_indices[group_id] = []
+        group_indices[group_id].append(idx)
+    
+    return pd.DataFrame(matches), group_indices
 
 # Application Streamlit
 def main():
@@ -403,23 +409,23 @@ def main():
     
     ### Algorithme de Matching
     
-    #### 1. Algorithme de Base : Jaro-Winkler
+    #### 1. Algorithme de Base : Comparaison Simple
    
-    - Utilise l'algorithme Jaro-Winkler pour calculer la similarité entre chaînes
+    - Utilise une comparaison simple des chaînes de caractères
     - Normalise les chaînes (suppression accents, majuscules)
     - Calcule un score de similarité brut entre 0 et 1
 
-    **Description rapide de Jaro-Winkler :**
-    - Algorithme de similarité entre chaînes de caractères
-    - Prend en compte les caractères communs et leur position
-    - Score plus élevé si les caractères communs sont au début
+    **Description de la méthode de comparaison :**
+    - Comparaison caractère par caractère
+    - Prise en compte de la longueur des chaînes
+    - Score plus élevé pour plus de caractères communs
     - Idéal pour les noms, prénoms et textes courts
     - Gère bien les erreurs de frappe et les variations mineures
     - Score de 1.0 = chaînes identiques
     - Score de 0.0 = chaînes complètement différentes
     
     #### 2. Algorithme de Matching Avancé
-    - Calcul des scores individuels avec Jaro-Winkler
+    - Calcul des scores individuels avec comparaison simple
     - Validation des attributs critiques (ID Véhicule, Immatriculation)
     - Validation des attributs secondaires (Email, Téléphone)
     - Validation des attributs nominaux (Nom, Prénom)
@@ -549,62 +555,23 @@ def main():
         # Affichage des résultats
         st.subheader("Résultats du Matching")
         
-        # Calcul des scores individuels pour chaque match
-        matches_df['Score Nom'] = matches_df.apply(lambda row: calculate_similarity(row['Client A'].split()[0], row['Client B'].split()[0]), axis=1)
-        matches_df['Score Prénom'] = matches_df.apply(lambda row: calculate_similarity(row['Client A'].split()[1], row['Client B'].split()[1]), axis=1)
-        matches_df['Score Email'] = matches_df.apply(lambda row: calculate_similarity(row['Client A'].split()[2], row['Client B'].split()[2]), axis=1)
-        matches_df['Score Téléphone'] = matches_df.apply(lambda row: calculate_similarity(row['Client A'].split()[3], row['Client B'].split()[3]), axis=1)
-        matches_df['Score ID Véhicule'] = matches_df.apply(lambda row: calculate_similarity(row['Client A'].split()[4], row['Client B'].split()[4]), axis=1)
-        matches_df['Score Immatriculation'] = matches_df.apply(lambda row: calculate_similarity(row['Client A'].split()[5], row['Client B'].split()[5]), axis=1)
-        
-        # Affichage des résultats avec filtres
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("#### Filtres")
-            min_score = st.slider("Score minimum", 0.0, 1.0, 0.7, 0.05)
-            decision_filter = st.multiselect(
-                "Décision",
-                options=["FUSION_AUTOMATIQUE", "FUSION_VERIFICATION", "FUSION_VALIDATION"],
-                default=["FUSION_AUTOMATIQUE", "FUSION_VERIFICATION", "FUSION_VALIDATION"]
-            )
-        
-        filtered_df = matches_df[
-            (matches_df['Score Global'] >= min_score) &
-            (matches_df['Décision'].isin(decision_filter))
-        ]
-        
-        with col2:
-            st.markdown(f"#### {len(filtered_df)} matches trouvés")
-            if len(filtered_df) > 0:
-                st.markdown(f"Score moyen : {filtered_df['Score Global'].mean():.2%}")
-                st.markdown(f"Score médian : {filtered_df['Score Global'].median():.2%}")
-        
-        # Affichage du tableau des résultats
-        st.dataframe(
-            filtered_df.style.format({
-                'Score Global': '{:.1%}',
-                'Score Nom': '{:.1%}',
-                'Score Prénom': '{:.1%}',
-                'Score Email': '{:.1%}',
-                'Score Téléphone': '{:.1%}',
-                'Score ID Véhicule': '{:.1%}',
-                'Score Immatriculation': '{:.1%}'
-            }),
-            use_container_width=True
-        )
+        # Filtrer les résultats par décision
+        for decision in ["FUSION_AUTOMATIQUE", "FUSION_VERIFICATION", "FUSION_VALIDATION", "PAS_FUSION"]:
+            st.markdown(f"### Exemples de décisions : {decision}")
+            filtered_matches = matches_df[matches_df['Decision'] == decision].head(5)
+            st.dataframe(filtered_matches)
         
         # Affichage des statistiques
         st.subheader("Statistiques des scores")
         if not matches_df.empty:
-            st.write(f"Score moyen : {matches_df['Score Global'].mean():.2%}")
-            st.write(f"Score minimum : {matches_df['Score Global'].min():.2%}")
-            st.write(f"Score maximum : {matches_df['Score Global'].max():.2%}")
+            st.write(f"Score moyen : {matches_df['Score_Global'].mean():.2%}")
+            st.write(f"Score minimum : {matches_df['Score_Global'].min():.2%}")
+            st.write(f"Score maximum : {matches_df['Score_Global'].max():.2%}")
             
             # Calculer les statistiques sur les scores
-            score_mean = matches_df['Score Global'].mean()
-            score_min = matches_df['Score Global'].min()
-            score_max = matches_df['Score Global'].max()
+            score_mean = matches_df['Score_Global'].mean()
+            score_min = matches_df['Score_Global'].min()
+            score_max = matches_df['Score_Global'].max()
             
             st.write(f"Score moyen : {score_mean:.2%}")
             st.write(f"Score minimum : {score_min:.2%}")
@@ -620,15 +587,15 @@ def main():
             
             # Créer un DataFrame avec les détails des clients
             comparison_data = []
-            for _, match in matches_df.iterrows():
-                client_a = clients[clients['Nom'] + ' ' + clients['Prénom'] == match['Client A']].iloc[0]
-                client_b = clients[clients['Nom'] + ' ' + clients['Prénom'] == match['Client B']].iloc[0]
+            for _, row in matches_df.iterrows():
+                client_a = clients.iloc[int(row['Index_A'])]
+                client_b = clients.iloc[int(row['Index_B'])]
                 
                 # Calculer la qualité en fonction du score
-                qualite = "✅ Excellente" if match['Score Global'] > 90 else "✅ Bonne" if match['Score Global'] > 80 else "⚠️ Moyenne" if match['Score Global'] > 70 else "❌ Faible"
+                qualite = "✅ Excellente" if row['Score_Global'] > 90 else "✅ Bonne" if row['Score_Global'] > 80 else "⚠️ Moyenne" if row['Score_Global'] > 70 else "❌ Faible"
                 
                 comparison_data.append({
-                    'Score Global': match['Score Global'],
+                    'Score_Global': row['Score_Global'],
                     'Qualité': qualite,
                     'Client A - Nom': client_a['Nom'],
                     'Client A - Prénom': client_a['Prénom'],
@@ -642,22 +609,22 @@ def main():
                     'Client B - Téléphone': client_b['Téléphone'],
                     'Client B - ID_Véhicule': client_b['ID_Véhicule'],
                     'Client B - Immatriculation': client_b['Immatriculation'],
-                    'Score Nom': match['Score Nom'],
-                    'Score Prénom': match['Score Prénom'],
-                    'Score Email': match['Score Email'],
-                    'Score Téléphone': match['Score Téléphone'],
-                    'Score ID Véhicule': match['Score ID Véhicule'],
-                    'Score Immatriculation': match['Score Immatriculation']
+                    'Score_Nom': row['Score_Nom'],
+                    'Score_Prenom': row['Score_Prenom'],
+                    'Score_Email': row['Score_Email'],
+                    'Score_Telephone': row['Score_Telephone'],
+                    'Score_ID_Vehicule': row['Score_ID_Vehicule'],
+                    'Score_Immatriculation': row['Score_Immatriculation']
                 })
             
             comparison_df = pd.DataFrame(comparison_data)
             
             # Grouper par qualité et sélectionner 3 exemples pour chaque niveau
             quality_groups = {
-                "✅ Excellente": comparison_df[comparison_df['Score Global'] > 90],
-                "✅ Bonne": comparison_df[(comparison_df['Score Global'] > 80) & (comparison_df['Score Global'] <= 90)],
-                "⚠️ Moyenne": comparison_df[(comparison_df['Score Global'] > 70) & (comparison_df['Score Global'] <= 80)],
-                "❌ Faible": comparison_df[comparison_df['Score Global'] <= 70]
+                "✅ Excellente": comparison_df[comparison_df['Score_Global'] > 90],
+                "✅ Bonne": comparison_df[(comparison_df['Score_Global'] > 80) & (comparison_df['Score_Global'] <= 90)],
+                "⚠️ Moyenne": comparison_df[(comparison_df['Score_Global'] > 70) & (comparison_df['Score_Global'] <= 80)],
+                "❌ Faible": comparison_df[comparison_df['Score_Global'] <= 70]
             }
             
             for quality, group in quality_groups.items():
@@ -667,7 +634,7 @@ def main():
                     examples = group.sample(n=min(3, len(group)))
                     
                     for _, row in examples.iterrows():
-                        with st.expander(f"Score Global: {row['Score Global']:.1f}%"):
+                        with st.expander(f"Score Global: {row['Score_Global']:.1f}%"):
                             col1, col2 = st.columns(2)
                             
                             with col1:
@@ -692,12 +659,15 @@ def main():
                             col3, col4, col5, col6, col7, col8 = st.columns(6)
                             
                             # Calculer les scores bruts
-                            nom_raw = calculate_similarity(row['Client A']['Nom'], row['Client B']['Nom'])
-                            prenom_raw = calculate_similarity(row['Client A']['Prénom'], row['Client B']['Prénom'])
-                            email_raw = calculate_similarity(row['Client A']['Email'], row['Client B']['Email'])
-                            telephone_raw = calculate_similarity(row['Client A']['Téléphone'], row['Client B']['Téléphone'])
-                            id_vehicule_raw = calculate_similarity(row['Client A']['ID_Véhicule'], row['Client B']['ID_Véhicule'])
-                            immatriculation_raw = calculate_similarity(row['Client A']['Immatriculation'], row['Client B']['Immatriculation'])
+                            client_a = clients.iloc[int(row['Index_A'])]
+                            client_b = clients.iloc[int(row['Index_B'])]
+                            
+                            nom_raw = calculate_similarity(client_a['Nom'], client_b['Nom'])
+                            prenom_raw = calculate_similarity(client_a['Prénom'], client_b['Prénom'])
+                            email_raw = calculate_similarity(client_a['Email'], client_b['Email'])
+                            telephone_raw = calculate_similarity(client_a['Téléphone'], client_b['Téléphone'])
+                            id_vehicule_raw = calculate_similarity(client_a['ID_Véhicule'], client_b['ID_Véhicule'])
+                            immatriculation_raw = calculate_similarity(client_a['Immatriculation'], client_b['Immatriculation'])
                             
                             # Calculer les scores pondérés
                             total_weight = sum(weights.values())
@@ -733,7 +703,7 @@ def main():
             # Distribution des scores
             st.subheader("Distribution des scores")
             fig, ax = plt.subplots(figsize=(10, 4))
-            ax.hist(matches_df['Score Global'], bins=20, color='#3498db', alpha=0.7)
+            ax.hist(matches_df['Score_Global'], bins=20, color='#3498db', alpha=0.7)
             ax.axvline(x=90, color='green', linestyle='--', label='Excellent (>90)')
             ax.axvline(x=80, color='orange', linestyle='--', label='Bon (>80)')
             ax.axvline(x=70, color='red', linestyle='--', label='Moyen (>70)')
@@ -746,7 +716,8 @@ def main():
             st.subheader("Groupes de clients identifiés")
             for group_id, indices in client_groups.items():
                 with st.expander(f"Groupe {group_id} ({len(indices)} clients)"):
-                    st.dataframe(clients.iloc[indices])
+                    group_clients = clients.iloc[indices]
+                    st.dataframe(group_clients)
         else:
             st.info("Aucun match trouvé avec les paramètres actuels. Essayez de réduire le seuil de similarité ou d'ajuster les poids des attributs.")
         
@@ -821,7 +792,7 @@ def main():
                     recommendations.append(f"L'attribut '{attr}' a un score moyen bas ({score:.1f}). Considérez ajuster son poids ou améliorer la qualité des données pour cet attribut.")
             
             # Analyser le seuil
-            if matches_df['Score Global'].min() < threshold * 0.9:
+            if matches_df['Score_Global'].min() < threshold * 0.9:
                 recommendations.append(f"Certains matches ont un score proche du seuil ({threshold}). Considérez ajuster légèrement le seuil pour éviter les faux négatifs.")
             
             # Recommandations sur les poids
@@ -947,7 +918,7 @@ def main():
                 st.markdown("### Recommandations pour la suite")
                 if any(score < 70 for score in adjusted_means):
                     st.write("• Continuer à surveiller les attributs avec des scores faibles")
-                if matches_df['Score Global'].mean() < 80:
+                if matches_df['Score_Global'].mean() < 80:
                     st.write("• Considérer l'ajout de règles métier spécifiques pour améliorer la précision")
                 if len(matches_df) > num_clients * 0.3:
                     st.write("• Revoir le seuil de similarité pour réduire les faux positifs")
