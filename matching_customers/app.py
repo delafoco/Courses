@@ -191,32 +191,25 @@ def normalize_string(s):
     """Convertit une chaîne en minuscules et supprime les accents."""
     return unidecode(str(s).lower())
 
-def calculate_similarity(str1, str2, weight):
-    """Calcule la similarité entre deux chaînes en appliquant un poids de manière équilibrée"""
-    # Calculer le score de similarité brut
-    raw_score = fuzz.ratio(normalize_string(str1), normalize_string(str2)) / 100
-    
-    # Appliquer le poids de manière plus équilibrée
-    # Si le poids est 0.5, le score sera réduit de 25% au lieu de 50%
-    # Si le poids est 0.8, le score sera réduit de 10% au lieu de 20%
-    reduction_factor = (1 - weight) * 0.5  # Réduction maximale de 50% même avec un poids de 0
-    return raw_score * (1 - reduction_factor)
+def calculate_similarity(str1, str2):
+    """Calcule la similarité entre deux chaînes en utilisant Jaro-Winkler"""
+    return fuzz.ratio(normalize_string(str1), normalize_string(str2)) / 100
 
 def match_clients(client_a, client_b, weights):
-    total_weight = sum(weights.values())
+    """Calcule le score de matching entre deux clients en appliquant les poids uniquement au score final"""
+    # Calcul des scores individuels avec Jaro-Winkler (sans poids)
+    nom_score = calculate_similarity(client_a['Nom'], client_b['Nom'])
+    prenom_score = calculate_similarity(client_a['Prénom'], client_b['Prénom'])
+    telephone_score = calculate_similarity(client_a['Téléphone'], client_b['Téléphone'])
+    email_score = calculate_similarity(client_a['Email'], client_b['Email'])
+    id_vehicule_score = calculate_similarity(client_a['ID_Véhicule'], client_b['ID_Véhicule'])
+    immatriculation_score = calculate_similarity(client_a['Immatriculation'], client_b['Immatriculation'])
     
-    # Normalisation des poids
+    # Normalisation des poids pour le score final
+    total_weight = sum(weights.values())
     normalized_weights = {k: v/total_weight for k, v in weights.items()}
     
-    # Calcul des scores individuels avec normalisation des chaînes
-    nom_score = calculate_similarity(client_a['Nom'], client_b['Nom'], normalized_weights['Nom'])
-    prenom_score = calculate_similarity(client_a['Prénom'], client_b['Prénom'], normalized_weights['Prénom'])
-    telephone_score = calculate_similarity(client_a['Téléphone'], client_b['Téléphone'], normalized_weights['Téléphone'])
-    email_score = calculate_similarity(client_a['Email'], client_b['Email'], normalized_weights['Email'])
-    id_vehicule_score = calculate_similarity(client_a['ID_Véhicule'], client_b['ID_Véhicule'], normalized_weights['ID_Véhicule'])
-    immatriculation_score = calculate_similarity(client_a['Immatriculation'], client_b['Immatriculation'], normalized_weights['Immatriculation'])
-    
-    # Calcul du score pondéré
+    # Calcul du score final pondéré
     score = (
         normalized_weights['Nom'] * nom_score +
         normalized_weights['Prénom'] * prenom_score +
@@ -239,10 +232,10 @@ def match_clients_advanced(client_a, client_b, weights):
     """
     Algorithme de matching avancé avec validation croisée
     """
-    # 1. Calcul des scores individuels
+    # 1. Calcul des scores individuels avec Jaro-Winkler (sans poids)
     scores = {}
-    for attr, weight in weights.items():
-        scores[attr] = calculate_similarity(client_a[attr], client_b[attr], weight)
+    for attr in ['Nom', 'Prénom', 'Email', 'Téléphone', 'ID_Véhicule', 'Immatriculation']:
+        scores[attr] = calculate_similarity(client_a[attr], client_b[attr])
     
     # 2. Validation des attributs critiques
     critical_attrs = ['ID_Véhicule', 'Immatriculation']
@@ -256,23 +249,19 @@ def match_clients_advanced(client_a, client_b, weights):
     nominal_attrs = ['Nom', 'Prénom']
     nominal_match = all(scores[attr] > 0.8 for attr in nominal_attrs)
     
-    # 5. Calcul du score global pondéré
+    # 5. Calcul du score final pondéré
     total_weight = sum(weights.values())
     normalized_weights = {k: v/total_weight for k, v in weights.items()}
     global_score = sum(scores[attr] * normalized_weights[attr] for attr in scores)
     
     # 6. Règles de décision
     if critical_match:
-        # Fusion automatique si les attributs critiques correspondent
         return global_score, scores, "FUSION_AUTOMATIQUE"
     elif global_score > 0.85 and secondary_match:
-        # Fusion avec vérification si bon score global et au moins un attribut secondaire correspond
         return global_score, scores, "FUSION_VERIFICATION"
     elif global_score > 0.75 and nominal_match:
-        # Fusion avec validation si score moyen mais noms correspondent
         return global_score, scores, "FUSION_VALIDATION"
     else:
-        # Pas de fusion
         return global_score, scores, "PAS_FUSION"
 
 def simulate_matching(clients, weights, threshold):
@@ -382,6 +371,10 @@ def simulate_matching_advanced(clients, weights, threshold):
 
 # Application Streamlit
 def main():
+    """
+    Application principale de matching client
+    Version 1.0 - Support de GitLab et GitHub
+    """
     st.title("🔍 Simulation de Matching Client")
     
     # Introduction détaillée
@@ -389,17 +382,11 @@ def main():
     ## Étude de Cas : Vision Client Unifiée
     
     ### Contexte Business
-    Une entreprise collecte des données clients via différents canaux d'interaction :
-    - Site web
-    - Application mobile
-    - Service client
-    - Points de vente
-    - Événements marketing
+    Des données clients sont collectées via différents canaux.
     
-    Chaque interaction crée un nouvel événement dans la base de données, ce qui peut générer des doublons ou des incohérences.
-    
-    ### Problématique
-    **Objectif** : Créer une vision unifiée du client en rapprochant les événements appartenant à la même personne.
+    Chaque interaction crée un nouvel événement dans la base de données.
+
+    **Objectif** : Créer une vision unifiée du client en rapprochant les événements des différents canaux pour une même personne.
     
     **Données** : 6 attributs clés pour identifier un client :
     1. Nom
@@ -414,167 +401,39 @@ def main():
     - Risque de faux positifs (fusionner deux clients différents)
     - Risque de faux négatifs (ne pas fusionner le même client)
     
-    ### Justification de l'Approche Avancée
-    
-    #### 1. Limites de Jaro-Winkler Seul
-    
-    **Problèmes Rencontrés** :
-    1. **Manque de Contexte**
-       - Jaro-Winkler traite tous les attributs de manière égale
-       - Ne prend pas en compte la fiabilité des attributs
-       - Exemple : "Jean Dupont" et "Jean Dupond" ont un score élevé mais peuvent être des personnes différentes
-    
-    2. **Faux Positifs Fréquents**
-       - Score élevé pour des variations mineures
-       - Ne gère pas bien les erreurs de saisie
-       - Exemple : "01 23 45 67 89" et "01 23 45 67 90" ont un score élevé mais sont des numéros différents
-    
-    3. **Pas de Validation Croisée**
-       - Pas de vérification entre attributs
-       - Risque de fusionner des clients différents
-       - Exemple : Même nom mais email et téléphone différents
-    
-    #### 2. Avantages de l'Approche Avancée
-    
-    **Améliorations Apportées** :
-    1. **Validation Hiérarchique**
-       ```python
-       # Validation des attributs critiques
-       critical_attrs = ['ID_Véhicule', 'Immatriculation']
-       critical_match = all(scores[attr] > 0.9 for attr in critical_attrs)
-       
-       # Validation des attributs secondaires
-       secondary_attrs = ['Email', 'Téléphone']
-       secondary_match = sum(scores[attr] > 0.85 for attr in secondary_attrs) >= 1
-       ```
-       - Prise en compte de la fiabilité des attributs
-       - Validation croisée entre attributs
-       - Réduction des faux positifs
-    
-    2. **Règles Métier Intégrées**
-       ```python
-       if critical_match:
-           return "FUSION_AUTOMATIQUE"  # Score > 90%
-       elif global_score > 0.85 and secondary_match:
-           return "FUSION_VERIFICATION"  # Score 80-90%
-       elif global_score > 0.75 and nominal_match:
-           return "FUSION_VALIDATION"    # Score 70-80%
-       ```
-       - Décisions basées sur des règles métier
-       - Niveaux de confiance différents
-       - Processus de validation adapté
-    
-    3. **Gestion des Risques**
-       - Réduction des faux positifs de 20-25% à 5-10%
-       - Augmentation de la précision de 75-80% à 90-95%
-       - Meilleure traçabilité des décisions
-    
-    #### 3. Comparaison Quantitative
-    
-    | Métrique | Jaro-Winkler Seul | Approche Avancée | Amélioration |
-    |----------|-------------------|------------------|--------------|
-    | Précision | 75-80% | 90-95% | +15-20% |
-    | Faux Positifs | 20-25% | 5-10% | -15-20% |
-    | Temps de Traitement | Rapide | Modéré | -20% |
-    | Maintenance | Simple | Complexe | +50% |
-    
-    #### 4. Cas d'Usage Illustratifs
-    
-    1. **Cas Favorable à Jaro-Winkler**
-       ```
-       Client A: Jean Dupont, 01 23 45 67 89
-       Client B: Jean Dupont, 01 23 45 67 89
-       Score Jaro-Winkler: 100%
-       Score Avancé: 100% (FUSION_AUTOMATIQUE)
-       ```
-    
-    2. **Cas Problématique pour Jaro-Winkler**
-       ```
-       Client A: Jean Dupont, 01 23 45 67 89, jean.dupont@email.com
-       Client B: Jean Dupond, 01 23 45 67 90, jean.dupond@email.com
-       Score Jaro-Winkler: 85% (Risque de fusion)
-       Score Avancé: 75% (PAS_FUSION)
-       ```
-    
-    3. **Cas Complexe**
-       ```
-       Client A: Jean Dupont, VEH12345, AB-123-CD
-       Client B: Jean Dupond, VEH12345, AB-123-CD
-       Score Jaro-Winkler: 90% (Risque de fusion)
-       Score Avancé: 95% (FUSION_AUTOMATIQUE car ID et immatriculation identiques)
-       ```
-    
-    #### 5. Recommandations d'Utilisation
-    
-    1. **Quand Utiliser Jaro-Winkler Seul**
-       - Données très propres et standardisées
-       - Besoin de performance rapide
-       - Risque de faux positifs acceptable
-    
-    2. **Quand Utiliser l'Approche Avancée**
-       - Données hétérogènes
-       - Besoin de haute précision
-       - Coût élevé des faux positifs
-       - Nécessité de validation croisée
-    
     ### Algorithme de Matching
     
     #### 1. Algorithme de Base : Jaro-Winkler
-    ```python
-    def calculate_similarity(str1, str2, weight):
-        raw_score = fuzz.ratio(normalize_string(str1), normalize_string(str2)) / 100
-        reduction_factor = (1 - weight) * 0.5
-        return raw_score * (1 - reduction_factor)
-    ```
+   
     - Utilise l'algorithme Jaro-Winkler pour calculer la similarité entre chaînes
     - Normalise les chaînes (suppression accents, majuscules)
-    - Applique un poids équilibré (réduction maximale de 50%)
+    - Calcule un score de similarité brut entre 0 et 1
+
+    **Description rapide de Jaro-Winkler :**
+    - Algorithme de similarité entre chaînes de caractères
+    - Prend en compte les caractères communs et leur position
+    - Score plus élevé si les caractères communs sont au début
+    - Idéal pour les noms, prénoms et textes courts
+    - Gère bien les erreurs de frappe et les variations mineures
+    - Score de 1.0 = chaînes identiques
+    - Score de 0.0 = chaînes complètement différentes
     
     #### 2. Algorithme de Matching Avancé
-    ```python
-    def match_clients_advanced(client_a, client_b, weights):
-        # 1. Calcul des scores individuels
-        scores = {}
-        for attr, weight in weights.items():
-            scores[attr] = calculate_similarity(client_a[attr], client_b[attr], weight)
-        
-        # 2. Validation des attributs critiques
-        critical_attrs = ['ID_Véhicule', 'Immatriculation']
-        critical_match = all(scores[attr] > 0.9 for attr in critical_attrs)
-        
-        # 3. Validation des attributs secondaires
-        secondary_attrs = ['Email', 'Téléphone']
-        secondary_match = sum(scores[attr] > 0.85 for attr in secondary_attrs) >= 1
-        
-        # 4. Validation des attributs nominaux
-        nominal_attrs = ['Nom', 'Prénom']
-        nominal_match = all(scores[attr] > 0.8 for attr in nominal_attrs)
-    ```
+    - Calcul des scores individuels avec Jaro-Winkler
+    - Validation des attributs critiques (ID Véhicule, Immatriculation)
+    - Validation des attributs secondaires (Email, Téléphone)
+    - Validation des attributs nominaux (Nom, Prénom)
     
     #### 3. Règles de Décision Hiérarchiques
-    ```python
-    # Règles de décision
-    if critical_match:
-        return "FUSION_AUTOMATIQUE"  # Score > 90%
-    elif global_score > 0.85 and secondary_match:
-        return "FUSION_VERIFICATION"  # Score 80-90%
-    elif global_score > 0.75 and nominal_match:
-        return "FUSION_VALIDATION"    # Score 70-80%
-    else:
-        return "PAS_FUSION"          # Score < 70%
-    ```
-    
-    #### 4. Caractéristiques Clés
-    
     1. **Approche Multi-niveaux**
        - Validation des attributs critiques (ID Véhicule, Immatriculation)
        - Validation des attributs secondaires (Email, Téléphone)
        - Validation des attributs nominaux (Nom, Prénom)
     
     2. **Système de Poids**
-       - Poids par attribut (0.0 à 1.0)
-       - Réduction équilibrée des scores
+       - Poids par attribut (0.0 à 1.0) pour le score final
        - Normalisation des poids
+       - Influence sur la décision finale uniquement
     
     3. **Règles de Fusion**
        - Fusion automatique (score > 90%)
@@ -634,31 +493,33 @@ def main():
     # Configuration des poids
     st.sidebar.markdown("### Poids des attributs (facteurs d'importance)")
     st.sidebar.markdown("""
-    Les poids sont utilisés pour ajuster l'importance de chaque attribut :
-    - 1.0 = importance maximale (pas de réduction)
-    - 0.5 = importance moyenne (réduction de 25%)
-    - 0.0 = importance minimale (réduction de 50%)
+    Les poids sont utilisés uniquement pour le calcul du score final :
+    - 1.0 = importance maximale
+    - 0.5 = importance moyenne
+    - 0.0 = importance minimale
 
     **Recommandations par défaut :**
     - ID Véhicule & Immatriculation (0.9) : Très fiables, uniques
     - Email (0.8) : Très fiable, personnel
     - Téléphone (0.7) : Assez fiable, peut changer
     - Nom & Prénom (0.5) : Moins fiables, sujets aux erreurs
+
+    Note : Les poids n'affectent que le score final. Le calcul de similarité Jaro-Winkler est effectué sans poids.
     """)
     
     weights = {
         'Nom': st.sidebar.slider('Poids du nom', 0.0, 1.0, 0.5, 0.1,
-                                help="Importance du nom dans le matching (0 = minimal, 1 = maximal). Recommandé : 0.5 car sujet aux erreurs."),
+                                help="Importance du nom dans le score final (0 = minimal, 1 = maximal). Recommandé : 0.5 car sujet aux erreurs."),
         'Prénom': st.sidebar.slider('Poids du prénom', 0.0, 1.0, 0.5, 0.1,
-                                   help="Importance du prénom dans le matching (0 = minimal, 1 = maximal). Recommandé : 0.5 car sujet aux erreurs."),
+                                   help="Importance du prénom dans le score final (0 = minimal, 1 = maximal). Recommandé : 0.5 car sujet aux erreurs."),
         'Email': st.sidebar.slider('Poids de l\'email', 0.0, 1.0, 0.8, 0.1,
-                                  help="Importance de l'email dans le matching (0 = minimal, 1 = maximal). Recommandé : 0.8 car très fiable."),
+                                  help="Importance de l'email dans le score final (0 = minimal, 1 = maximal). Recommandé : 0.8 car très fiable."),
         'Téléphone': st.sidebar.slider('Poids du téléphone', 0.0, 1.0, 0.7, 0.1,
-                                      help="Importance du téléphone dans le matching (0 = minimal, 1 = maximal). Recommandé : 0.7 car assez fiable."),
+                                      help="Importance du téléphone dans le score final (0 = minimal, 1 = maximal). Recommandé : 0.7 car assez fiable."),
         'ID_Véhicule': st.sidebar.slider("Poids pour l'ID Véhicule", 0.0, 1.0, 0.9, 0.1,
-                                        help="Importance de l'ID véhicule dans le matching (0 = minimal, 1 = maximal). Recommandé : 0.9 car très fiable."),
+                                        help="Importance de l'ID véhicule dans le score final (0 = minimal, 1 = maximal). Recommandé : 0.9 car très fiable."),
         'Immatriculation': st.sidebar.slider("Poids pour l'Immatriculation", 0.0, 1.0, 0.9, 0.1,
-                                            help="Importance de l'immatriculation dans le matching (0 = minimal, 1 = maximal). Recommandé : 0.9 car très fiable.")
+                                            help="Importance de l'immatriculation dans le score final (0 = minimal, 1 = maximal). Recommandé : 0.9 car très fiable.")
     }
     
     # Seuil de similarité
@@ -686,37 +547,72 @@ def main():
             matches_df, client_groups = simulate_matching_advanced(clients, weights, threshold)
         
         # Affichage des résultats
-        st.subheader("Résultats du matching")
+        st.subheader("Résultats du Matching")
         
+        # Calcul des scores individuels pour chaque match
+        matches_df['Score Nom'] = matches_df.apply(lambda row: calculate_similarity(row['Client A'].split()[0], row['Client B'].split()[0]), axis=1)
+        matches_df['Score Prénom'] = matches_df.apply(lambda row: calculate_similarity(row['Client A'].split()[1], row['Client B'].split()[1]), axis=1)
+        matches_df['Score Email'] = matches_df.apply(lambda row: calculate_similarity(row['Client A'].split()[2], row['Client B'].split()[2]), axis=1)
+        matches_df['Score Téléphone'] = matches_df.apply(lambda row: calculate_similarity(row['Client A'].split()[3], row['Client B'].split()[3]), axis=1)
+        matches_df['Score ID Véhicule'] = matches_df.apply(lambda row: calculate_similarity(row['Client A'].split()[4], row['Client B'].split()[4]), axis=1)
+        matches_df['Score Immatriculation'] = matches_df.apply(lambda row: calculate_similarity(row['Client A'].split()[5], row['Client B'].split()[5]), axis=1)
+        
+        # Affichage des résultats avec filtres
         col1, col2 = st.columns(2)
         
         with col1:
-            st.write(f"Nombre total de matches trouvés : {len(matches_df)}")
-            
-            # Regrouper les clients en groupes
-            groups = {}
-            for idx, group_id in client_groups.items():
-                if group_id not in groups:
-                    groups[group_id] = []
-                groups[group_id].append(idx)
-            
-            st.write(f"Nombre de groupes de clients identifiés : {len(groups)}")
+            st.markdown("#### Filtres")
+            min_score = st.slider("Score minimum", 0.0, 1.0, 0.7, 0.05)
+            decision_filter = st.multiselect(
+                "Décision",
+                options=["FUSION_AUTOMATIQUE", "FUSION_VERIFICATION", "FUSION_VALIDATION"],
+                default=["FUSION_AUTOMATIQUE", "FUSION_VERIFICATION", "FUSION_VALIDATION"]
+            )
+        
+        filtered_df = matches_df[
+            (matches_df['Score Global'] >= min_score) &
+            (matches_df['Décision'].isin(decision_filter))
+        ]
         
         with col2:
+            st.markdown(f"#### {len(filtered_df)} matches trouvés")
+            if len(filtered_df) > 0:
+                st.markdown(f"Score moyen : {filtered_df['Score Global'].mean():.2%}")
+                st.markdown(f"Score médian : {filtered_df['Score Global'].median():.2%}")
+        
+        # Affichage du tableau des résultats
+        st.dataframe(
+            filtered_df.style.format({
+                'Score Global': '{:.1%}',
+                'Score Nom': '{:.1%}',
+                'Score Prénom': '{:.1%}',
+                'Score Email': '{:.1%}',
+                'Score Téléphone': '{:.1%}',
+                'Score ID Véhicule': '{:.1%}',
+                'Score Immatriculation': '{:.1%}'
+            }),
+            use_container_width=True
+        )
+        
+        # Affichage des statistiques
+        st.subheader("Statistiques des scores")
+        if not matches_df.empty:
+            st.write(f"Score moyen : {matches_df['Score Global'].mean():.2%}")
+            st.write(f"Score minimum : {matches_df['Score Global'].min():.2%}")
+            st.write(f"Score maximum : {matches_df['Score Global'].max():.2%}")
+            
             # Calculer les statistiques sur les scores
-            if not matches_df.empty:
-                st.write("Statistiques des scores :")
-                score_mean = matches_df['Score Global'].mean()
-                score_min = matches_df['Score Global'].min()
-                score_max = matches_df['Score Global'].max()
-                
-                st.write(f"Score moyen : {score_mean:.2f}")
-                st.write(f"Score minimum : {score_min:.2f}")
-                st.write(f"Score maximum : {score_max:.2f}")
-                
-                # Indications sur la qualité des matches
-                score_quality = "Excellente" if score_mean > 90 else "Bonne" if score_mean > 80 else "Moyenne" if score_mean > 70 else "Faible"
-                st.markdown(f"**Qualité globale des matches: {score_quality}**")
+            score_mean = matches_df['Score Global'].mean()
+            score_min = matches_df['Score Global'].min()
+            score_max = matches_df['Score Global'].max()
+            
+            st.write(f"Score moyen : {score_mean:.2%}")
+            st.write(f"Score minimum : {score_min:.2%}")
+            st.write(f"Score maximum : {score_max:.2%}")
+            
+            # Indications sur la qualité des matches
+            score_quality = "Excellente" if score_mean > 90 else "Bonne" if score_mean > 80 else "Moyenne" if score_mean > 70 else "Faible"
+            st.markdown(f"**Qualité globale des matches: {score_quality}**")
         
         # Afficher les matches trouvés
         if not matches_df.empty:
@@ -796,12 +692,12 @@ def main():
                             col3, col4, col5, col6, col7, col8 = st.columns(6)
                             
                             # Calculer les scores bruts
-                            nom_raw = calculate_similarity(row['Client A']['Nom'], row['Client B']['Nom'], weights['Nom'])
-                            prenom_raw = calculate_similarity(row['Client A']['Prénom'], row['Client B']['Prénom'], weights['Prénom'])
-                            email_raw = calculate_similarity(row['Client A']['Email'], row['Client B']['Email'], weights['Email'])
-                            telephone_raw = calculate_similarity(row['Client A']['Téléphone'], row['Client B']['Téléphone'], weights['Téléphone'])
-                            id_vehicule_raw = calculate_similarity(row['Client A']['ID_Véhicule'], row['Client B']['ID_Véhicule'], weights['ID_Véhicule'])
-                            immatriculation_raw = calculate_similarity(row['Client A']['Immatriculation'], row['Client B']['Immatriculation'], weights['Immatriculation'])
+                            nom_raw = calculate_similarity(row['Client A']['Nom'], row['Client B']['Nom'])
+                            prenom_raw = calculate_similarity(row['Client A']['Prénom'], row['Client B']['Prénom'])
+                            email_raw = calculate_similarity(row['Client A']['Email'], row['Client B']['Email'])
+                            telephone_raw = calculate_similarity(row['Client A']['Téléphone'], row['Client B']['Téléphone'])
+                            id_vehicule_raw = calculate_similarity(row['Client A']['ID_Véhicule'], row['Client B']['ID_Véhicule'])
+                            immatriculation_raw = calculate_similarity(row['Client A']['Immatriculation'], row['Client B']['Immatriculation'])
                             
                             # Calculer les scores pondérés
                             total_weight = sum(weights.values())
@@ -848,7 +744,7 @@ def main():
             
             # Visualisation des groupes de clients
             st.subheader("Groupes de clients identifiés")
-            for group_id, indices in groups.items():
+            for group_id, indices in client_groups.items():
                 with st.expander(f"Groupe {group_id} ({len(indices)} clients)"):
                     st.dataframe(clients.iloc[indices])
         else:
